@@ -2,9 +2,16 @@
 import asyncio
 import os
 import sys
-from pyrogram import Client, filters # 'types' ko yahan se hata dein
+import logging
+
+# Logging for Heroku stability
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pyrogram.errors import UserNotParticipant, FloodWait
+
 from config import Config
 from database.mongo import (
     add_session, get_sessions, delete_all_sessions, 
@@ -15,7 +22,13 @@ from utils.helpers import parse_target, auto_join, get_progress_card
 from utils.user_guide import GUIDE_TEXT
 from report import send_single_report
 
-app = Client("UltimateReportBot", api_id=Config.API_ID, api_hash=Config.API_HASH, bot_token=Config.BOT_TOKEN)
+app = Client(
+    "UltimateReportBot", 
+    api_id=Config.API_ID, 
+    api_hash=Config.API_HASH, 
+    bot_token=Config.BOT_TOKEN,
+    in_memory=True
+)
 
 U_STATE = {}
 
@@ -72,6 +85,38 @@ async def cb_handler(client, cb):
         await cb.answer("Bot Restarting...", show_alert=True)
         os.execl(sys.executable, sys.executable, *sys.argv)
 
+    elif data == "manage_sessions":
+        sessions = await get_sessions(uid)
+        kb = [[InlineKeyboardButton("➕ Add New Sessions", callback_data="add_sess_p")],
+              [InlineKeyboardButton("🗑️ Clear Sessions", callback_data="clear_sess_p")],
+              [InlineKeyboardButton("🔙 Back", callback_data="start_back")]]
+        await cb.edit_message_text(f"📂 **Session Manager**\nYou have **{len(sessions)}** saved sessions.", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data == "add_sess_p":
+        U_STATE[uid] = {"step": "WAIT_SESS"}
+        await cb.edit_message_text("📝 **Send your Pyrogram Session Strings:**\n\n(Multiple sessions separate with `,`)")
+
+    elif data == "clear_sess_p":
+        await delete_all_sessions(uid)
+        await cb.answer("✅ All sessions cleared!", show_alert=True)
+        await cb_handler(client, types.CallbackQuery(data="manage_sessions", id=cb.id))
+
+    elif data == "set_min" and uid == Config.OWNER_ID:
+        U_STATE[uid] = {"step": "WAIT_MIN_SESS"}
+        await cb.edit_message_text("🔢 Enter the new **Minimum Sessions** limit:")
+
+    elif data == "set_fsub" and uid == Config.OWNER_ID:
+        U_STATE[uid] = {"step": "WAIT_FSUB"}
+        await cb.edit_message_text("📢 Enter the **Channel Username** (without @) for Force Subscribe:")
+
+    elif data == "add_sudo_p" and uid == Config.OWNER_ID:
+        U_STATE[uid] = {"step": "WAIT_ADD_SUDO"}
+        await cb.edit_message_text("👤 Enter the **User ID** to add as Sudo:")
+
+    elif data == "rem_sudo_p" and uid == Config.OWNER_ID:
+        U_STATE[uid] = {"step": "WAIT_REM_SUDO"}
+        await cb.edit_message_text("👤 Enter the **User ID** to remove from Sudo:")
+
     elif data == "open_reporter":
         status, val = await verify_user(uid)
         if status == "MIN_SESS":
@@ -84,46 +129,81 @@ async def cb_handler(client, cb):
         U_STATE[uid]["step"] = "WAIT_DESC"
         await cb.edit_message_text("✏️ **Step 4: Description**\n\nType your report message:")
 
+    elif data == "open_guide":
+        await cb.edit_message_text(GUIDE_TEXT, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_back")]]))
+
     elif data == "start_back":
-        # Simplified back to start logic
-        await cb.edit_message_text("💎 Main Menu", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Launch Reporter", callback_data="open_reporter")],
-            [InlineKeyboardButton("📂 Sessions", callback_data="manage_sessions"), InlineKeyboardButton("📖 Guide", callback_data="open_guide")],
-            [InlineKeyboardButton("⚙️ Owner", callback_data="owner_panel")] if uid == Config.OWNER_ID else []
-        ]))
+        status, data_v = await verify_user(uid)
+        kb = [[InlineKeyboardButton("🚀 Launch Reporter", callback_data="open_reporter")],
+              [InlineKeyboardButton("📂 Sessions", callback_data="manage_sessions"), InlineKeyboardButton("📖 Guide", callback_data="open_guide")],
+              [InlineKeyboardButton("⚙️ Owner", callback_data="owner_panel")] if uid == Config.OWNER_ID else []]
+        await cb.edit_message_text(f"💎 **Ultimate OxyReport Pro v3.0**", reply_markup=InlineKeyboardMarkup(kb))
 
 @app.on_message(filters.private)
 async def msg_handler(client, message: Message):
     uid = message.from_user.id
     if uid not in U_STATE: return
     state = U_STATE[uid]
-    
-    if state["step"] == "WAIT_JOIN":
-        state["join"] = message.text if message.text != "/skip" else None
+    txt = message.text
+
+    # Owner Level Inputs
+    if state["step"] == "WAIT_MIN_SESS" and uid == Config.OWNER_ID:
+        if txt.isdigit():
+            await update_bot_settings({"min_sessions": int(txt)})
+            await message.reply_text(f"✅ Min sessions updated to {txt}")
+            del U_STATE[uid]
+    elif state["step"] == "WAIT_FSUB" and uid == Config.OWNER_ID:
+        await update_bot_settings({"force_sub": txt.replace("@", "")})
+        await message.reply_text(f"✅ Force subscribe updated to @{txt}")
+        del U_STATE[uid]
+    elif state["step"] == "WAIT_ADD_SUDO" and uid == Config.OWNER_ID:
+        if txt.isdigit():
+            await add_sudo(int(txt))
+            await message.reply_text(f"✅ User {txt} added as Sudo.")
+            del U_STATE[uid]
+    elif state["step"] == "WAIT_REM_SUDO" and uid == Config.OWNER_ID:
+        if txt.isdigit():
+            await remove_sudo(int(txt))
+            await message.reply_text(f"✅ User {txt} removed from Sudo.")
+            del U_STATE[uid]
+
+    # User Level Inputs
+    elif state["step"] == "WAIT_SESS":
+        sess_list = txt.split(",")
+        count = 0
+        for s in sess_list:
+            if len(s.strip()) > 50:
+                await add_session(uid, s.strip())
+                count += 1
+        await message.reply_text(f"✅ {count} sessions added!")
+        del U_STATE[uid]
+    elif state["step"] == "WAIT_JOIN":
+        state["join"] = txt if txt != "/skip" else None
         state["step"] = "WAIT_TARGET"
         await message.reply_text("🎯 **Step 2: Target Link**\n\nSend t.me/ link:")
     elif state["step"] == "WAIT_TARGET":
         try:
-            state["cid"], state["mid"] = parse_target(message.text)
-            state["url"] = message.text
+            state["cid"], state["mid"] = parse_target(txt)
+            state["url"] = txt
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("Spam", callback_data="rc_1"), InlineKeyboardButton("Porn", callback_data="rc_4")], [InlineKeyboardButton("Other", callback_data="rc_8")]])
             await message.reply_text("⚖️ **Step 3: Reason**", reply_markup=kb)
         except Exception as e: await message.reply_text(f"❌ {e}")
     elif state["step"] == "WAIT_DESC":
-        state["desc"] = message.text
+        state["desc"] = txt
         state["step"] = "WAIT_COUNT"
         await message.reply_text("🔢 **Step 5: Count**\n\nTotal reports?")
     elif state["step"] == "WAIT_COUNT":
-        if message.text.isdigit():
-            state["count"] = int(message.text)
+        if txt.isdigit():
+            state["count"] = int(txt)
             asyncio.create_task(process_reports(message, state))
             del U_STATE[uid]
 
 async def process_reports(msg, config):
-    panel = await msg.reply_text("⏳ **Initializing...**")
+    panel = await msg.reply_text("⏳ **Initializing Advanced Panel...**")
     uid = msg.from_user.id
     sessions = await get_sessions(uid)
     clients = []
+    
     for s in sessions:
         c = Client(name=f"c_{uid}_{sessions.index(s)}", api_id=Config.API_ID, api_hash=Config.API_HASH, session_string=s, in_memory=True)
         try:
@@ -132,17 +212,26 @@ async def process_reports(msg, config):
             clients.append(c)
         except: continue
     
-    if not clients: return await panel.edit_text("❌ No active sessions.")
+    if not clients: return await panel.edit_text("❌ No active sessions connected.")
     
     success, failed = 0, 0
-    for i in range(config["count"]):
+    total = config["count"]
+    for i in range(total):
         res = await send_single_report(clients[i % len(clients)], config["cid"], config["mid"], config["code"], config["desc"])
         if res: success += 1
         else: failed += 1
-        if i % 5 == 0 or i == config["count"] - 1:
-            await panel.edit_text(get_progress_card(config["url"], success, failed, config["count"], len(clients)))
+        if i % 5 == 0 or i == total - 1:
+            try: await panel.edit_text(get_progress_card(config["url"], success, failed, total, len(clients)))
+            except: pass
         await asyncio.sleep(0.3)
     for c in clients: await c.stop()
 
+async def start_bot():
+    logger.info("Bot is starting...")
+    await app.start()
+    logger.info("Ultimate reported online!")
+    await idle()
+    await app.stop()
+
 if __name__ == "__main__":
-    app.run()
+    asyncio.get_event_loop().run_until_complete(start_bot())
