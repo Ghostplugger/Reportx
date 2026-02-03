@@ -40,32 +40,33 @@ app = Client(
 U_STATE = {}
 
 async def verify_user(uid):
-    """Safe verification for bot access logic."""
     try:
-        # DB setup calls with internal timeout
         settings = await get_bot_settings()
         sudo = await is_sudo(uid)
-        
-        # 1. Force Sub Check
+
+        # 1. Force Subscribe
         fsub = settings.get("force_sub")
         if fsub and not sudo:
             try:
-                chat = fsub if fsub.startswith("-100") or fsub.isdigit() else f"@{fsub.replace('@', '')}"
+                chat = int(fsub) if fsub.startswith("-100") else f"@{fsub.lstrip('@')}"
                 await app.get_chat_member(chat, uid)
-            except UserNotParticipant: 
-                return "JOIN_REQUIRED", fsub.replace("@", "")
-            except: pass
-        
-        # 2. Contribution Check (Min 3)
+            except UserNotParticipant:
+                return "JOIN_REQUIRED", fsub.lstrip("@")
+            except Exception as e:
+                logger.warning(f"FSub check error: {e}")
+
+        # 2. Contribution Check
         if not sudo:
+            MIN_CONTRIB = 1
             count = await get_user_contribution_count(uid)
-            if count < 1:
-                return "MIN_CONTRIBUTION", 1 - count
-        
+            if count < MIN_CONTRIB:
+                return "MIN_CONTRIBUTION", MIN_CONTRIB - count
+
         return "OK", None
+
     except Exception as e:
         logger.error(f"Verify Logic Error: {e}")
-        return "OK", None
+        return "ERROR", None
 
 # ==========================================
 #          MESSAGE HANDLERS
