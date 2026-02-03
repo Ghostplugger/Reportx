@@ -1,108 +1,119 @@
 # database/mongo.py
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import Config
-import logging
 
-logger = logging.getLogger(__name__)
+# Logging setup for monitoring
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("UltimateMongo")
 
-# --- Database Initialization ---
-# Connecting to MongoDB Atlas using the URL from Config
+# --- MongoDB Init ---
+# Client: Motor (Async) | Database: startlove
 client = AsyncIOMotorClient(Config.MONGO_URL)
-db = client["startlove"]  # Fixed Database Name: startlove
+db = client["startlove"]
 
-# --- Collection Definitions ---
+# --- Collections ---
 sessions_db = db["sessions"]
 sudo_db = db["sudo_users"]
 settings_db = db["settings"]
 
-# --- Session Management Logic (Optimized) ---
+# ==========================================
+#         GLOBAL SESSION SYSTEM
+# ==========================================
 
 async def add_session(user_id: int, session_str: str):
     """
-    Saves a session string to the database.
-    Uses 'update_one' with 'upsert' to prevent duplicates.
-    Enforces user_id as Integer for new entries.
+    Any user can contribute sessions to the global pool.
+    Uniqueness is maintained via the session string itself.
     """
     try:
-        uid = int(user_id)
+        session_clean = session_str.strip()
+        if len(session_clean) < 50: # Basic validation
+            return False
+            
         await sessions_db.update_one(
-            {"user_id": uid, "session": session_str},
-            {"$set": {"user_id": uid, "session": session_str}},
+            {"session": session_clean},
+            {
+                "$set": {
+                    "session": session_clean,
+                    "contributor": int(user_id)
+                }
+            },
             upsert=True
         )
         return True
     except Exception as e:
-        logger.error(f"Error in add_session: {e}")
+        logger.error(f"Add session fail: {e}")
         return False
 
-async def get_sessions(user_id: int):
+async def get_all_sessions():
     """
-    Retrieves ALL sessions for a specific ID from 'startlove'.
-    FIX: Uses '$or' to scan both Integer and String User IDs.
-    This ensures that sessions saved previously (even by old bot versions) 
-    are correctly extracted.
+    Fetches every session for reporting tasks. 
+    Returns a list of strings.
     """
     try:
-        uid = int(user_id)
-        # Scan for both formats to ensure no sessions are missed
-        cursor = sessions_db.find({
-            "$or": [
-                {"user_id": uid},
-                {"user_id": str(uid)}
-            ]
-        })
-        
-        sessions = [s["session"] async for s in cursor if "session" in s]
-        logger.info(f"Database Scan for {uid}: Found {len(sessions)} sessions in 'startlove'")
-        return sessions
+        cursor = sessions_db.find({})
+        return [doc["session"] async for doc in cursor if "session" in doc]
     except Exception as e:
-        logger.error(f"Error in get_sessions: {e}")
+        logger.error(f"Global extraction error: {e}")
         return []
 
-async def delete_all_sessions(user_id: int):
-    """Wipes all sessions for a user, checking both ID formats."""
+async def delete_all_sessions(request_user_id: int):
+    """
+    RESTRICTED: Only the Owner can wipe the database or delete sessions.
+    Loophole Fix: Double-check ID inside the DB layer.
+    """
+    if int(request_user_id) != Config.OWNER_ID:
+        logger.warning(f"Unauthorized wipe attempt by {request_user_id}")
+        return "DENIED" # Safety trigger
+        
     try:
-        uid = int(user_id)
-        await sessions_db.delete_many({
-            "$or": [
-                {"user_id": uid},
-                {"user_id": str(uid)}
-            ]
-        })
-        return True
+        await sessions_db.delete_many({})
+        return "SUCCESS"
     except Exception as e:
-        logger.error(f"Error deleting sessions: {e}")
-        return False
+        logger.error(f"Wipe error: {e}")
+        return "ERROR"
 
-# --- Sudo/Permission Management ---
-
-async def add_sudo(user_id: int):
-    uid = int(user_id)
-    await sudo_db.update_one({"user_id": uid}, {"$set": {"user_id": uid}}, upsert=True)
-
-async def remove_sudo(user_id: int):
-    uid = int(user_id)
-    await sudo_db.delete_one({"user_id": uid})
+# ==========================================
+#         PERMISSIONS & SUDO
+# ==========================================
 
 async def is_sudo(user_id: int):
-    """Checks if a user is Sudo or Owner."""
-    if user_id == Config.OWNER_ID:
-        return True
+    """Checks if user is Owner or Sudo."""
     uid = int(user_id)
-    sudo = await sudo_db.find_one({"user_id": uid})
-    return sudo is not None
+    if uid == Config.OWNER_ID:
+        return True
+    res = await sudo_db.find_one({"user_id": uid})
+    return bool(res)
+
+async def add_sudo(user_id: int, request_user_id: int):
+    """Only Owner can promote users to Sudo."""
+    if int(request_user_id) != Config.OWNER_ID:
+        return False
+    await sudo_db.update_one(
+        {"user_id": int(user_id)}, 
+        {"$set": {"user_id": int(user_id)}}, 
+        upsert=True
+    )
+    return True
+
+async def remove_sudo(user_id: int, request_user_id: int):
+    """Only Owner can demote Sudo users."""
+    if int(request_user_id) != Config.OWNER_ID:
+        return False
+    await sudo_db.delete_one({"user_id": int(user_id)})
+    return True
 
 async def get_all_sudos():
     cursor = sudo_db.find({})
     return [s["user_id"] async for s in cursor]
 
-# --- Global Bot Configuration Management ---
+# ==========================================
+#         BOT SETTINGS (GLOBAL)
+# ==========================================
 
 async def get_bot_settings():
-    """
-    Fetches global settings with safety fallbacks.
-    Prevents KeyError if 'force_sub' or 'min_sessions' is missing.
-    """
+    """Retrieves config like Force Sub and Min Sessions."""
     try:
         settings = await settings_db.find_one({"id": "bot_config"})
         if not settings:
@@ -114,17 +125,18 @@ async def get_bot_settings():
             await settings_db.insert_one(default)
             return default
         
-        # Reliability check for existing documents
-        if "min_sessions" not in settings: 
-            settings["min_sessions"] = Config.DEFAULT_MIN_SESSIONS
-        if "force_sub" not in settings: 
-            settings["force_sub"] = None
-            
+        # Stability repair
+        if "min_sessions" not in settings: settings["min_sessions"] = Config.DEFAULT_MIN_SESSIONS
+        if "force_sub" not in settings: settings["force_sub"] = None
+        
         return settings
     except Exception as e:
-        logger.error(f"Error getting settings: {e}")
+        logger.error(f"Settings retrieval error: {e}")
         return {"min_sessions": Config.DEFAULT_MIN_SESSIONS, "force_sub": None}
 
-async def update_bot_settings(updates: dict):
-    """Updates global config such as Force Sub or Min Sessions."""
+async def update_bot_settings(updates: dict, request_user_id: int):
+    """Only Owner can change global bot settings."""
+    if int(request_user_id) != Config.OWNER_ID:
+        return False
     await settings_db.update_one({"id": "bot_config"}, {"$set": updates}, upsert=True)
+    return True
