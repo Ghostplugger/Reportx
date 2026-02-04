@@ -14,81 +14,57 @@ sessions_db = db["sessions"]
 sudo_db = db["sudo_users"]
 settings_db = db["settings"]
 
-# ==========================================
-#      DANGEROUS: WIPE LOGIC (LOCKED)
-# ==========================================
-
+# --- WIPE LOGIC (LOCKED) ---
 async def delete_all_sessions(request_user_id: int):
-    """
-    POLICY: Database wipe is disabled to protect the Global Session Pool.
-    """
+    """POLICY: No one can wipe the pool."""
     logger.warning(f"BLOCKED: Unauthorized wipe attempt by user {request_user_id}")
     return "LOCKED"
 
-# ==========================================
-#      GLOBAL SESSION POOL & EXTRACTION
-# ==========================================
-
+# --- GLOBAL POOL LOGIC ---
 async def add_session(user_id: int, session_str: str):
-    """Saves session with uniqueness check based on the string itself."""
+    """Saves session with unique check."""
     try:
-        s_clean = session_str.strip()
-        if len(s_clean) < 100: return False
+        s = session_str.strip()
+        if len(s) < 100: return False
         await sessions_db.update_one(
-            {"session": s_clean},
-            {"$set": {"session": s_clean, "contributor": int(user_id)}},
+            {"session": s}, 
+            {"$set": {"session": s, "contributor": int(user_id)}}, 
             upsert=True
         )
         return True
     except: return False
 
 async def get_sessions(ignored_id=None):
-    """
-    AGRESSIVE EXTRACTION:
-    Scans every document for Pyrogram strings in any potential field name.
-    """
+    """AGRESSIVE EXTRACTION: Checks all possible field names from startlove DB."""
     try:
         cursor = sessions_db.find({})
         results = []
         async for doc in cursor:
-            # Check all possible historical field names
+            # Multi-field check for legacy data
             p = doc.get("session") or doc.get("string") or doc.get("session_string") or doc.get("session_str")
             if p and len(str(p)) > 100:
                 results.append(str(p).strip())
-        
-        unique_sessions = list(set(results))
-        logger.info(f"Pool Extracted: {len(unique_sessions)} unique sessions found.")
-        return unique_sessions
+        unique = list(set(results))
+        logger.info(f"Pool: Loaded {len(unique)} active sessions.")
+        return unique
     except Exception as e:
-        logger.error(f"DB Extraction Error: {e}")
+        logger.error(f"DB Error: {e}")
         return []
 
 async def get_user_contribution_count(user_id: int):
-    """Returns number of sessions added by a specific user."""
     return await sessions_db.count_documents({"contributor": int(user_id)})
 
 async def cleanup_invalid_sessions():
-    """
-    STARTUP CLEANER: 
-    Removes documents from DB that don't contain valid length session strings.
-    """
+    """STARTUP AUDIT: Removes junk records to prevent worker hang."""
     try:
         cursor = sessions_db.find({})
-        removed = 0
         async for doc in cursor:
             p = doc.get("session") or doc.get("string") or doc.get("session_string") or doc.get("session_str")
             if not p or len(str(p)) < 100:
                 await sessions_db.delete_one({"_id": doc["_id"]})
-                removed += 1
-        if removed > 0:
-            logger.info(f"DB Cleanup: Deleted {removed} invalid entries.")
-    except Exception as e:
-        logger.error(f"Cleanup Failed: {e}")
+    except: pass
 
-# ==========================================
-#        STAFF & SETTINGS MANAGEMENT
-# ==========================================
-
+# --- STAFF & SETTINGS ---
 async def is_sudo(user_id: int):
     uid = int(user_id)
     if uid == Config.OWNER_ID: return True
