@@ -14,7 +14,7 @@ class Config:
     
     # --- Bot Credentials ---
     # Get from @BotFather
-    BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
+    BOT_TOKEN = os.environ.get("BOT_TOKEN", "8567869168:AAHM_iFZHZNfntpvAZJLG2d3ph6O1qhK2l8")
     
     # --- Administrative Control ---
     # Your personal Telegram User ID (Get from @userinfobot)
