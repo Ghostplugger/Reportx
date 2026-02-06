@@ -22,7 +22,7 @@ class Config:
     
     # --- Persistent Storage ---
     # MongoDB Connection String (Get from https://mongodb.com)
-    MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://your_url_here")
+    MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://MISSAVA:XuPWJQW0vfsUGf8z@certified.564gwfy.mongodb.net/?appName=Certified)
     
     # --- Logic & Restrictions ---
     # Default minimum sessions required for non-sudo users
