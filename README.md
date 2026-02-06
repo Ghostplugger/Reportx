@@ -1,6 +1,6 @@
 [![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/Oxeigns/reportBot2)
 
-# 💎 Ultimate OxyReport Pro v3.0
+# 💎 Ultimate ZeroxReport Pro v3.0
 
 The most advanced, feature-rich Telegram reporting bot. Specifically built for high-performance and live tracking.
 
