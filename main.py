@@ -22,7 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("OxyBot")
+logger = logging.getLogger("ZeroxBot")
 
 # ==========================================
 #      FIX 1: PREFIX FLATTENING (No TypeError)
@@ -43,7 +43,7 @@ else:
 
 # Client Initialization
 app = Client(
-    "OxyBot", 
+    "ZeroxBot", 
     api_id=int(Config.API_ID), 
     api_hash=Config.API_HASH, 
     bot_token=Config.BOT_TOKEN, 
