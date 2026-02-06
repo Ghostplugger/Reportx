@@ -1,7 +1,7 @@
 # utils/user_guide.py
 
 GUIDE_TEXT = """
-📖 **Ultimate OxyReport Pro v3.0 - User Guide**
+📖 **Ultimate ZeroxReport Pro v3.0 - User Guide**
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 🚀 **How to Access & Use:**
