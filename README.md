@@ -1,4 +1,4 @@
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/Oxeigns/reportBot2)
+[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/Ghostplugger/Reportx)
 
 # 💎 Ultimate ZeroxReport Pro v3.0
 
