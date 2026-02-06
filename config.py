@@ -9,8 +9,8 @@ class Config:
     
     # --- Telegram API Credentials ---
     # Get these from https://my.telegram.org
-    API_ID = int(os.environ.get("API_ID", 12345)) 
-    API_HASH = os.environ.get("API_HASH", "your_api_hash")
+    API_ID = int(os.environ.get("API_ID", 24874387)) 
+    API_HASH = os.environ.get("API_HASH", "30412996f61fcc8e827b689a62fc9049)
     
     # --- Bot Credentials ---
     # Get from @BotFather
