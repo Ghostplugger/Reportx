@@ -13,7 +13,7 @@ from pyrogram.errors import (
     UsernameNotOccupied
 )
 
-logger = logging.getLogger("OxyReport")
+logger = logging.getLogger("ZeroxReport")
 
 
 async def _normalize_chat_id(client: Client, chat_id: int | str):
