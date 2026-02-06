@@ -18,7 +18,7 @@ class Config:
     
     # --- Administrative Control ---
     # Your personal Telegram User ID (Get from @userinfobot)
-    OWNER_ID = int(os.environ.get("OWNER_ID", 0))
+    OWNER_ID = int(os.environ.get("OWNER_ID", 8504640946))
     
     # --- Persistent Storage ---
     # MongoDB Connection String (Get from https://mongodb.com)
